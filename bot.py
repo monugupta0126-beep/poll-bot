@@ -16,7 +16,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 flask_app = Flask(__name__)
 @flask_app.route('/')
 def health_check():
-    return "QUICK STUDY Bot is Running!", 200
+    return "Bot is Running!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -26,11 +26,10 @@ def run_flask():
 TOKEN = "8753514994:AAGbwCwus8v7KBeNHN6tXW2cZIE7vLXXCX8"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 **QUICK STUDY Universal Bot** तैयार है!\n\nअब यह Simple, कथन-कारण और 1,2,3 वाले सभी फॉर्मेट्स सपोर्ट करता है। बस प्रश्न भेजें!")
+    await update.message.reply_text("🚀 **Universal Bot (Fixed)** तैयार है!\n\nअब (A), (B), (C), (D) वाले विकल्प सही से Clickable बनेंगे।")
 
 async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text
-    # प्रश्नों को अलग करना (Double Newline)
     question_blocks = [b.strip() for b in re.split(r'\n\s*\n', raw_text.strip()) if b.strip()]
     
     total = len(question_blocks)
@@ -50,22 +49,21 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         option_detected = False
 
         for line in lines:
-            # 1. Explanation (Ex:) पहचानना - इसके बाद वाला सब कुछ सुरक्षित रहेगा
+            # 1. Explanation (Ex:) - पूरा टेक्स्ट उठाना
             if line.lower().startswith("ex:"):
                 explanation = re.sub(r'^[Ee][Xx]:\s*', '', line).strip()
                 continue
 
-            # 2. विकल्पों की पहचान (A, B, C, D)
-            # यह चेक करेगा कि लाइन (A) या A. से शुरू हो रही है या नहीं
-            match_option = re.match(r'^[\(\[]?([a-dA-D1-4])[\.\)\]\s-]\s*(.*)', line, re.IGNORECASE)
+            # 2. विकल्पों की पहचान - केवल तभी जब लाइन (A), A., (1) या 1. से शुरू हो
+            # और उसके बाद कोई विकल्प हो। यह '1. यदि लेंस...' जैसे लंबे प्रश्न को नहीं पकड़ेगा।
+            # हमने Regex को 'A-D' के लिए सख्त कर दिया है ताकि clickable बटन सही बनें।
+            option_match = re.match(r'^[\(\[]?([a-dA-D])[\.\)\]\s-]\s*(.*)', line, re.IGNORECASE)
             
-            if match_option:
+            if option_match:
                 option_detected = True
-                option_text = match_option.group(2).strip()
+                opt_text = option_match.group(2).strip()
                 is_correct = "✅" in line
-                
-                # टिक मार्क हटाकर साफ़ टेक्स्ट रखना
-                clean_opt = option_text.replace("✅", "").strip()
+                clean_opt = opt_text.replace("✅", "").strip()
                 
                 if clean_opt:
                     options.append(clean_opt)
@@ -73,24 +71,22 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         correct_id = len(options) - 1
                 continue
 
-            # 3. अगर विकल्प अभी शुरू नहीं हुए हैं, तो वह प्रश्न का हिस्सा है
+            # 3. प्रश्न का हिस्सा (जब तक विकल्प न मिलें)
             if not option_detected:
                 question_parts.append(line)
 
-        # पूरा प्रश्न टेक्स्ट
         full_question = "\n".join(question_parts)
 
-        # पोल भेजने की प्रक्रिया
         if 2 <= len(options) <= 10:
             while True:
                 try:
                     await context.bot.send_poll(
                         chat_id=update.effective_chat.id,
-                        question=full_question[:300], # Telegram limit 300
+                        question=full_question[:300],
                         options=options[:10],
                         type=PollType.QUIZ,
                         correct_option_id=correct_id,
-                        explanation=explanation[:200] if explanation else None, # Telegram limit 200
+                        explanation=explanation[:200] if explanation else None,
                         is_anonymous=False
                     )
                     count += 1
@@ -105,12 +101,9 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ सफलतापूर्वक {count} पोल तैयार किए गए!")
 
 if __name__ == '__main__':
-    # Flask सर्वर को थ्रेड में चलाना
     threading.Thread(target=run_flask, daemon=True).start()
-    
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), create_bulk_quiz))
-    
-    print("Bot is running...")
     app.run_polling()
+    
