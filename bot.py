@@ -2,79 +2,119 @@ import logging
 import re
 import asyncio
 import os
+import threading
+from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import PollType
-from flask import Flask
-from threading import Thread
+from telegram.error import RetryAfter
 
-# --- Flask Server for Render ---
-app = Flask('')
+# Logging Setup
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-@app.route('/')
-def home():
-    return "QUICK STUDY Bot is Running Live!"
+# --- Render के लिए Flask Web Server ---
+flask_app = Flask(__name__)
 
-def run_web():
+@flask_app.route('/')
+def health_check():
+    return "Bot is Running Live!", 200
+
+def run_flask():
+    # Render स्वचालित रूप से PORT प्रदान करता है
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    flask_app.run(host='0.0.0.0', port=port)
 
-# --- Bot Config ---
+# --- आपका टेलीग्राम बोट कोड ---
 TOKEN = "8753514994:AAGbwCwus8v7KBeNHN6tXW2cZIE7vLXXCX8"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 **QUICK STUDY Permanent Bot** Live!\nप्रश्नों का सेट भेजें।")
+    await update.message.reply_text(
+        "🚀 **QUICK STUDY Universal Bot** तैयार है!\n\n"
+        "यह बोट अब तीनों फॉर्मेट सपोर्ट करता है:\n"
+        "1️⃣ **Simple MCQ** (A, B, C, D)\n"
+        "2️⃣ **Multi-Statement** (1, 2, 3 कथन वाले)\n"
+        "3️⃣ **Assertion-Reason** (कथन-कारण वाले)\n\n"
+        "बस प्रश्न भेजें, विकल्प के आगे ✅ लगाना न भूलें।"
+    )
 
 async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text
-    question_blocks = re.split(r'\n\s*\n', raw_text.strip())
+    question_blocks = [b.strip() for b in re.split(r'\n\s*\n', raw_text.strip()) if b.strip()]
     
+    total = len(question_blocks)
+    if total == 0: return
+    
+    await update.message.reply_text(f"⚡ {total} प्रश्न मिले। प्रोसेसिंग शुरू...")
+
+    count = 0
     for block in question_blocks:
         lines = [l.strip() for l in block.split('\n') if l.strip()]
         if len(lines) < 2: continue
 
-        question = lines[0]
+        question_parts = []
         options = []
         correct_id = 0
         explanation = ""
+        option_detected = False
 
-        for line in lines[1:]:
-            if line.upper().startswith("EX:"):
-                exp_clean = re.split(r'𝐉𝐎इ𝐍', line, flags=re.IGNORECASE)[0]
+        for line in lines:
+            if line.lower().startswith("ex:"):
+                exp_clean = re.split(r'JOIN|JOइN', line, flags=re.IGNORECASE)[0]
                 explanation = exp_clean.replace("Ex:", "").replace("EX:", "").strip()
                 continue
+
+            # विकल्पों की पहचान
+            match_option = re.match(r'^[\(\[]?[a-dA-D][\.\)\]\s-]\s*(.*)', line, re.IGNORECASE)
             
-            if "JOIN" in line.upper() or "@" in line:
+            if match_option:
+                option_detected = True
+                option_text = match_option.group(1).strip()
+                is_correct = "✅" in line
+                clean_opt = option_text.replace("✅", "").strip()
+                
+                if clean_opt:
+                    options.append(clean_opt)
+                    if is_correct:
+                        correct_id = len(options) - 1
                 continue
 
-            is_correct = "✅" in line
-            clean_option = line.replace("✅", "").strip()
-            clean_option = re.sub(r'^[a-zA-Z0-9][\.\)]\s*', '', clean_option)
+            if not option_detected:
+                if not any(x in line.upper() for x in ["JOIN", "@", "HTTP"]):
+                    question_parts.append(line)
 
-            if clean_option:
-                options.append(clean_option)
-                if is_correct:
-                    correct_id = len(options) - 1
+        full_question = "\n".join(question_parts)
 
-        if len(options) >= 2:
-            try:
-                await context.bot.send_poll(
-                    chat_id=update.effective_chat.id,
-                    question=question[:300],
-                    options=options[:10],
-                    type=PollType.QUIZ,
-                    correct_option_id=correct_id,
-                    explanation=explanation[:200] if explanation else None,
-                    is_anonymous=False
-                )
-                await asyncio.sleep(0.6) 
-            except Exception:
-                continue
+        if 2 <= len(options) <= 10:
+            while True:
+                try:
+                    await context.bot.send_poll(
+                        chat_id=update.effective_chat.id,
+                        question=full_question[:300],
+                        options=options[:10],
+                        type=PollType.QUIZ,
+                        correct_option_id=correct_id,
+                        explanation=explanation[:200] if explanation else None,
+                        is_anonymous=False
+                    )
+                    count += 1
+                    await asyncio.sleep(0.5) 
+                    break 
+                except RetryAfter as e:
+                    await asyncio.sleep(e.retry_after)
+                except Exception as e:
+                    logging.error(f"Error: {e}")
+                    break
+
+    await update.message.reply_text(f"✅ सफलतापूर्वक {count} पोल तैयार किए गए!")
 
 if __name__ == '__main__':
-    Thread(target=run_web).start()
-    bot_app = ApplicationBuilder().token(TOKEN).read_timeout(120).write_timeout(120).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), create_bulk_quiz))
-    print("Bot is starting...")
-    bot_app.run_polling()
+    # Flask को अलग थ्रेड में चलाएं
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    # बोट शुरू करें
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), create_bulk_quiz))
+    
+    print("Universal Bot is running on Render...")
+    app.run_polling()
