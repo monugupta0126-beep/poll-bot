@@ -14,31 +14,26 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # --- Render के लिए Flask Web Server ---
 flask_app = Flask(__name__)
-
 @flask_app.route('/')
 def health_check():
-    return "Bot is Running Live!", 200
+    return "QUICK STUDY Bot is Running!", 200
 
 def run_flask():
-    # Render स्वचालित रूप से PORT प्रदान करता है
     port = int(os.environ.get("PORT", 8080))
     flask_app.run(host='0.0.0.0', port=port)
 
-# --- आपका टेलीग्राम बोट कोड ---
+# --- टेलीग्राम बोट टोकन ---
 TOKEN = "8753514994:AAGbwCwus8v7KBeNHN6tXW2cZIE7vLXXCX8"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🚀 **QUICK STUDY Universal Bot** तैयार है!\n\n"
-        "यह बोट अब तीनों फॉर्मेट सपोर्ट करता है:\n"
-        "1️⃣ **Simple MCQ** (A, B, C, D)\n"
-        "2️⃣ **Multi-Statement** (1, 2, 3 कथन वाले)\n"
-        "3️⃣ **Assertion-Reason** (कथन-कारण वाले)\n\n"
-        "बस प्रश्न भेजें, विकल्प के आगे ✅ लगाना न भूलें।"
+        "अब `Ex:` के बाद वाला पूरा टेक्स्ट (लिंक और मैसेज सहित) पोल के Explanation में आएगा।"
     )
 
 async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text
+    # प्रश्नों के ब्लॉक्स को अलग करना
     question_blocks = [b.strip() for b in re.split(r'\n\s*\n', raw_text.strip()) if b.strip()]
     
     total = len(question_blocks)
@@ -58,17 +53,18 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         option_detected = False
 
         for line in lines:
+            # 1. Explanation (Ex:) पहचानना - अब यह कुछ भी नहीं हटाएगा
             if line.lower().startswith("ex:"):
-                exp_clean = re.split(r'JOIN|JOइN', line, flags=re.IGNORECASE)[0]
-                explanation = exp_clean.replace("Ex:", "").replace("EX:", "").strip()
+                # "Ex:" या "EX:" को हटाकर बाकी सब कुछ Explanation में डालना
+                explanation = re.sub(r'^[Ee][Xx]:\s*', '', line).strip()
                 continue
 
-            # विकल्पों की पहचान
-            match_option = re.match(r'^[\(\[]?[a-dA-D][\.\)\]\s-]\s*(.*)', line, re.IGNORECASE)
+            # 2. विकल्पों की पहचान
+            match_option = re.match(r'^[\(\[]?([a-dA-D1-4])[\.\)\]\s-]\s*(.*)', line, re.IGNORECASE)
             
             if match_option:
                 option_detected = True
-                option_text = match_option.group(1).strip()
+                option_text = match_option.group(2).strip()
                 is_correct = "✅" in line
                 clean_opt = option_text.replace("✅", "").strip()
                 
@@ -78,12 +74,14 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         correct_id = len(options) - 1
                 continue
 
+            # 3. प्रश्न का हिस्सा
             if not option_detected:
-                if not any(x in line.upper() for x in ["JOIN", "@", "HTTP"]):
-                    question_parts.append(line)
+                # प्रश्न के अंदर से भी फिल्टर हटा दिए गए हैं ताकि पूरा टेक्स्ट आए
+                question_parts.append(line)
 
         full_question = "\n".join(question_parts)
 
+        # पोल भेजने की प्रक्रिया
         if 2 <= len(options) <= 10:
             while True:
                 try:
@@ -108,13 +106,8 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ सफलतापूर्वक {count} पोल तैयार किए गए!")
 
 if __name__ == '__main__':
-    # Flask को अलग थ्रेड में चलाएं
     threading.Thread(target=run_flask, daemon=True).start()
-    
-    # बोट शुरू करें
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), create_bulk_quiz))
-    
-    print("Universal Bot is running on Render...")
     app.run_polling()
