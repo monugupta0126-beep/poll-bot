@@ -27,23 +27,19 @@ TOKEN = "8722160781:AAHqY5XPGitplUtXe0CtN0rjoPBdjt3wAFo"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🚀 **QUICK STUDY Master Bot** एक्टिव है!\n\n"
-        "आप इन 3 में से किसी भी फॉर्मेट में प्रश्न भेजें:\n"
-        "1️⃣ **Simple** (बिना A, B, C, D के भी चलेगा)\n"
-        "2️⃣ **Statements** (1, 2, 3 कथन वाले)\n"
-        "3️⃣ **Assertion-Reason** (कथन-कारण वाले)\n\n"
-        "बल्क में हज़ारों प्रश्न प्रोसेस करने के लिए तैयार।"
+        "🚀 **QUICK STUDY Master Bot v2.0** अपडेट हो गया है!\n\n"
+        "✅ अब बहुत लंबे प्रश्न भी बिना कटे बनेंगे।\n"
+        "✅ अगर प्रश्न 300 शब्दों से बड़ा होगा, तो बाकी जानकारी 'Explanation' में आ जाएगी।"
     )
 
 async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text
-    # प्रश्नों के ब्लॉक्स को अलग करना (Double newline)
     question_blocks = [b.strip() for b in re.split(r'\n\s*\n', raw_text.strip()) if b.strip()]
     
     total = len(question_blocks)
     if total == 0: return
     
-    await update.message.reply_text(f"⚡ {total} प्रश्न मिले। प्रोसेसिंग शुरू...")
+    await update.message.reply_text(f"⚡ {total} प्रश्न मिले। बल्क प्रोसेसिंग शुरू...")
 
     count = 0
     for block in question_blocks:
@@ -53,68 +49,69 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         question_parts = []
         options = []
         correct_id = 0
-        explanation = ""
+        explanation_body = ""
         
-        # पहले हम Explanation को अलग कर लेते हैं
-        temp_lines = []
+        # 1. Explanation को अलग करना
+        filtered_lines = []
         for line in lines:
             if line.lower().startswith("ex:"):
-                explanation = re.sub(r'^[Ee][Xx]:\s*', '', line).strip()
+                explanation_body = re.sub(r'^[Ee][Xx]:\s*', '', line).strip()
             else:
-                temp_lines.append(line)
+                filtered_lines.append(line)
 
-        # अब विकल्प और प्रश्न को अलग करने का उन्नत तरीका
-        # हम नीचे से ऊपर की तरफ चेक करेंगे कि विकल्प कहाँ खत्म हो रहे हैं
-        found_options = False
+        # 2. विकल्प और प्रश्न को अलग करना
         potential_options = []
-        actual_question = []
+        actual_question_lines = []
+        found_options = False
 
-        # अगर आखिरी 4 लाइनों में ✅ है या वे छोटी हैं, तो वे विकल्प हैं
-        for i in range(len(temp_lines)-1, -1, -1):
-            curr_line = temp_lines[i]
-            
-            # अगर विकल्प (A), (B) से शुरू हो रहे हैं
+        for i in range(len(filtered_lines)-1, -1, -1):
+            curr_line = filtered_lines[i]
+            # विकल्प की पहचान: (A) या ✅ या छोटी लाइन
             is_labeled = re.match(r'^[\(\[]?([a-dA-D1-4])[\.\)\]\s-]', curr_line)
-            # या अगर उनमें ✅ लगा है
             has_check = "✅" in curr_line
             
-            if (is_labeled or has_check or (len(potential_options) < 4 and not found_options)):
-                # यह लाइन एक विकल्प हो सकती है
-                # लेकिन अगर ये '1. यदि...' जैसा बड़ा कथन है, तो इसे प्रश्न में ही रहने दें
+            if not found_options and (is_labeled or has_check or len(potential_options) < 4):
                 if len(curr_line) > 100 and not has_check:
-                    actual_question.insert(0, curr_line)
-                    found_options = True # अब इसके ऊपर सब प्रश्न है
+                    actual_question_lines.insert(0, curr_line)
+                    found_options = True
                 else:
                     potential_options.insert(0, curr_line)
             else:
                 found_options = True
-                actual_question.insert(0, curr_line)
+                actual_question_lines.insert(0, curr_line)
 
         # विकल्पों को साफ़ करना
-        for idx, opt in enumerate(potential_options):
+        for opt in potential_options:
             is_correct = "✅" in opt
-            # टिक और लेबल (A., B.) हटाना
             clean_opt = re.sub(r'^[\(\[]?([a-dA-D1-4])[\.\)\]\s-]\s*', '', opt)
             clean_opt = clean_opt.replace("✅", "").strip()
-            
             if clean_opt:
                 options.append(clean_opt)
                 if is_correct:
                     correct_id = len(options) - 1
 
-        full_question = "\n".join(actual_question)
+        # 3. प्रश्न की लंबाई मैनेज करना (Telegram Limit: 300)
+        full_q_text = "\n".join(actual_question_lines)
+        final_explanation = explanation_body
 
-        # पोल भेजना
+        if len(full_q_text) > 300:
+            # अगर प्रश्न बड़ा है, तो मुख्य प्रश्न को ऊपर रखें और कथनों को Explanation में डालें
+            title = actual_question_lines[0]
+            statements = "\n".join(actual_question_lines[1:])
+            full_q_text = title[:295] + "..."
+            final_explanation = f"📋 प्रश्न विवरण:\n{statements}\n\n💡 व्याख्या: {explanation_body}"
+
+        # 4. पोल भेजना
         if 2 <= len(options) <= 10:
             while True:
                 try:
                     await context.bot.send_poll(
                         chat_id=update.effective_chat.id,
-                        question=full_question[:300],
+                        question=full_q_text,
                         options=options[:10],
                         type=PollType.QUIZ,
                         correct_option_id=correct_id,
-                        explanation=explanation[:200] if explanation else None,
+                        explanation=final_explanation[:200], # Explanation Limit: 200
                         is_anonymous=False
                     )
                     count += 1
@@ -134,3 +131,4 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), create_bulk_quiz))
     app.run_polling()
+    
