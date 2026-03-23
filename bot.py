@@ -13,7 +13,7 @@ from telegram.error import RetryAfter
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # --- Render Flask Server ---
-flask_app = Flask(name)
+flask_app = Flask(__name__)
 @flask_app.route('/')
 def health_check():
     return "Quick Study Universal Engine is Running!", 200
@@ -27,11 +27,11 @@ TOKEN = "8722160781:AAHqY5XPGitplUtXe0CtN0rjoPBdjt3wAFo"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🚀 QUICK STUDY Master Bot एक्टिव है!\n\n"
+        "🚀 **QUICK STUDY Master Bot** एक्टिव है!\n\n"
         "आप इन 3 में से किसी भी फॉर्मेट में प्रश्न भेजें:\n"
-        "1️⃣ Simple (बिना A, B, C, D के भी चलेगा)\n"
-        "2️⃣ Statements (1, 2, 3 कथन वाले)\n"
-        "3️⃣ Assertion-Reason (कथन-कारण वाले)\n\n"
+        "1️⃣ **Simple** (बिना A, B, C, D के भी चलेगा)\n"
+        "2️⃣ **Statements** (1, 2, 3 कथन वाले)\n"
+        "3️⃣ **Assertion-Reason** (कथन-कारण वाले)\n\n"
         "बल्क में हज़ारों प्रश्न प्रोसेस करने के लिए तैयार।"
     )
 
@@ -103,3 +103,34 @@ async def create_bulk_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     correct_id = len(options) - 1
 
         full_question = "\n".join(actual_question)
+
+        # पोल भेजना
+        if 2 <= len(options) <= 10:
+            while True:
+                try:
+                    await context.bot.send_poll(
+                        chat_id=update.effective_chat.id,
+                        question=full_question[:400],
+                        options=options[:10],
+                        type=PollType.QUIZ,
+                        correct_option_id=correct_id,
+                        explanation=explanation[:200] if explanation else None,
+                        is_anonymous=False
+                    )
+                    count += 1
+                    await asyncio.sleep(0.5) 
+                    break 
+                except RetryAfter as e:
+                    await asyncio.sleep(e.retry_after)
+                except Exception as e:
+                    logging.error(f"Error: {e}")
+                    break
+
+    await update.message.reply_text(f"✅ सफलतापूर्वक {count} पोल तैयार किए गए!")
+
+if __name__ == '__main__':
+    threading.Thread(target=run_flask, daemon=True).start()
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), create_bulk_quiz))
+    app.run_polling()
